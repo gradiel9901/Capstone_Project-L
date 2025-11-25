@@ -19,6 +19,10 @@ public class PlayerMovement : MonoBehaviour
     public Vector3 weaponRotationOffset;
     public Vector3 weaponPositionOffset;
 
+    [Header("Combat Settings")]
+    public float comboResetTime = 2.0f;
+    public float attackRate = 0.5f; // Minimum time between clicks
+
     [Header("References")]
     public Transform playerCamera;
 
@@ -29,6 +33,10 @@ public class PlayerMovement : MonoBehaviour
     private PlayerControls inputActions;
     private Vector2 moveInput;
     private GameObject currentWeapon;
+
+    private int comboCounter = 0;
+    private float lastClickedTime = 0;
+    private float nextAttackTime = 0;
 
     private void Awake()
     {
@@ -49,19 +57,15 @@ public class PlayerMovement : MonoBehaviour
 
     private void Update()
     {
-        // --- NEW: REALTIME WEAPON ADJUSTMENT ---
-        // This allows you to edit position/rotation while the game is playing
         if (currentWeapon != null)
         {
             currentWeapon.transform.localPosition = weaponPositionOffset;
             currentWeapon.transform.localRotation = Quaternion.Euler(weaponRotationOffset);
         }
 
-        // 1. MOVEMENT INPUT 
         moveInput = inputActions.Player.Move.ReadValue<Vector2>();
         bool jumpTriggered = inputActions.Player.Jump.triggered;
 
-        // 2. INTERACT INPUT (HARDWARE CHECK)
         bool fKeyPressed = false;
         if (Keyboard.current != null)
         {
@@ -70,11 +74,25 @@ public class PlayerMovement : MonoBehaviour
 
         if (fKeyPressed)
         {
-            Debug.Log("HARDWARE CHECK: F Key was physically pressed!");
             TryEquipWeapon();
         }
 
-        // --- Standard Movement Logic ---
+        // ATTACK LOGIC
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame && currentWeapon != null)
+        {
+            // Only allow attack if enough time has passed since the last one
+            if (Time.time >= nextAttackTime)
+            {
+                PerformAttack();
+            }
+        }
+
+        if (Time.time - lastClickedTime > comboResetTime)
+        {
+            comboCounter = 0;
+            if (animator != null) animator.SetInteger("ComboCount", 0);
+        }
+
         isGrounded = controller.isGrounded;
         if (isGrounded && velocity.y < 0)
         {
@@ -115,25 +133,35 @@ public class PlayerMovement : MonoBehaviour
         controller.Move(velocity * Time.deltaTime);
     }
 
+    private void PerformAttack()
+    {
+        lastClickedTime = Time.time;
+        nextAttackTime = Time.time + attackRate; // Set the cooldown
+
+        comboCounter++;
+
+        if (comboCounter > 5)
+        {
+            comboCounter = 1;
+        }
+
+        if (animator != null)
+        {
+            animator.SetInteger("ComboCount", comboCounter);
+            animator.SetTrigger("OnAttack");
+        }
+    }
+
     private void TryEquipWeapon()
     {
-        if (currentWeapon != null)
-        {
-            Debug.Log("Logic Check: You already have a weapon.");
-            return;
-        }
+        if (currentWeapon != null) return;
 
         Collider[] hits = Physics.OverlapSphere(transform.position, interactionRange, weaponLayer);
 
         if (hits.Length > 0)
         {
-            Debug.Log("SUCCESS: Found sword: " + hits[0].name);
             GameObject weapon = hits[0].gameObject;
             Equip(weapon);
-        }
-        else
-        {
-            Debug.Log("FAIL: F key worked, but Sphere found 0 objects on Weapon Layer.");
         }
     }
 
@@ -148,7 +176,6 @@ public class PlayerMovement : MonoBehaviour
 
         weapon.transform.SetParent(handContainer);
 
-        // Initial set (Update loop will handle the rest)
         weapon.transform.localPosition = weaponPositionOffset;
         weapon.transform.localRotation = Quaternion.Euler(weaponRotationOffset);
     }
